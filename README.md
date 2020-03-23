@@ -1,3 +1,13 @@
+# COVID-19-chill
+Statistical Analysis of Covid-19. Yes, it's a real issue but no, it isn't as radical as you might think.
+
+## Executive Summary
+I am using real world data from real sources to show an unbiased view of what is taking place. I am doing this because my belief is that Covid-19 is a real issue; however, I feel that the media is looking for the most radical or "scary" chart that they can possibly show. I plan to show the actual data with realistic expectations backed by mathematics and statistics. Hang in there - it's a weird world right now but let's use math and statistics to paint a true picture of what is going on. 
+
+## Data Sources
+I am pulling my data from Johns Hopkins GitHub account for the <a href="https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data" target="_blank">Covid-19 Data</a>. I take the data and subset it to compare mostly Italy v. US but I may subset the data to try and reproduce charts that are being used in the media to show how the charts are created as well as if the charts are being creatd in a way that doesn't tell the whole story. What I don't know from this dataset are the granular details such as the patient data (like age, sex, etc.). 
+
+
 # 2019 Novel Coronavirus COVID-19 (2019-nCoV) Data Repository by Johns Hopkins CSSE
 
 
