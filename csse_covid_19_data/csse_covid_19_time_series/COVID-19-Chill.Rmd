@@ -1,0 +1,254 @@
+---
+title: "COVID-19-Chill"
+author: "Jeremy Harris"
+date: "March 23, 2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, messages = FALSE, warning = FALSE)
+```
+
+#COVID-19 Data & Real-World Statistics
+COVID-19 has taken our world over and while it does seem to be highly contagious, I want to look further into the data and provide information that is purely driven by statistics. The data I'm using is from Johns Hopkins GitHub account. The primary purpose of this project is to tell the story behind the numbers and hopefully reduce the potential of over-hyped decisions and further economic disaster if it is not warranted. 
+
+##Load & Prep The Data
+I'll be pulling the data from the Johns Hopkins' time series reports. The reports are broken down into three different csv files that are updated daily: **Confirmed, Recovered, Death**. I'll be consolidating these files so that I can pull out the US data for analysis. I'll be comparing this to Italy as it is used most often in the media for various statistics.
+
+##Confirmed Cases Analysis
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#Read in the three time series csv files from Johns Hopkins
+conf <- read.csv("time_series_19-covid-Confirmed.csv")
+# reco <- read.csv("time_series_19-covid-Recovered.csv")
+# dead <- read.csv("time_series_19-covid-Deaths.csv")
+
+#Get the files down to the US data I need for an analysis
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+
+#create us_conf
+us_conf <- conf %>%
+  select(-c(Province.State, Lat, Long)) %>%
+  filter(Country.Region == "US")
+
+names(us_conf)[2:62] <- substring(names(us_conf)[2:62], 2) #rename date columns
+
+us_conf <- us_conf %>%
+  summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of the US
+  # mutate(country="US") %>% #create country column again
+  # select(62, 1:61) #put country column first
+  gather(Date, value = "Total.US")
+
+us_conf$Date <- gsub("\\.", "-", us_conf$Date) #remove . and replace with -
+us_conf$Date <- as.Date(us_conf$Date, format = "%m-%d-%y") #format as date
+
+#create data with a start point of 100 cases and show as "Day 1" instead of actual date
+us_conf100 <- us_conf %>%
+  filter(Total.US > 99) %>%
+  mutate(zDay = seq(1:20))
+
+#plot the us data
+ggplot(us_conf100, aes(zDay, Total.US)) + 
+  geom_col(fill = "dodgerblue1") + 
+  labs(x="Days Starting @ 100+ Cases", y = "Total Confirmed in US", title = "COVID-19 Confirmed in US Total by Date") + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+It's pretty clear to see that there is a dramatic increase in the total confirmed cases per day in the US. However, keep in mind a few things: 
+
+* We are only testing (for the most part) sick or highly likely sick people.
+* We don't really know how many cases we have as a starting point to compare growth.
+
+###Let me explain further...
+To get a true understanding of the infection rate we would need to test a random sample of the population and keep testing that same sample over set time periods to determine the infection rate inside of our sample. Then, we would have an established baseline and we could use math/statistics to provide realistic probability outcomes. If we are only testing a biased group then our results will be biased. Furthermore, if we are not continuing to take a sample population and re-test them then we don't really know if any of the measures we are putting in place are working properly. Instead, you see a **shiny graph** like the one above and immediately think: *"Oh my God, we're all going to die!"*. Well, not so fast.
+
+##Let's Compare Our Growth Rate Based on Population Percentage to Italy's
+Since Italy has become the "worst case scenario" for this virus, then let's see what it looks like if we compare our current infection rate based on the number of cases per day to that of Italy when we factor in our the population of the two countries. 
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#Now I need to gather Italy's information
+#create it_conf
+it_conf <- conf %>%
+  select(-c(Province.State, Lat, Long)) %>%
+  filter(Country.Region == "Italy")
+
+names(it_conf)[2:62] <- substring(names(it_conf)[2:62], 2) #rename date columns
+
+it_conf <- it_conf %>%
+  summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of the US
+  gather(Date, value = "Total.Italy")
+
+it_conf$Date <- gsub("\\.", "-", it_conf$Date) #remove . and replace with -
+it_conf$Date <- as.Date(it_conf$Date, format = "%m-%d-%y") #format as date
+
+#create data with a start point of 100 cases and show as "Day 1" instead of actual date
+it_conf100 <- it_conf %>%
+  filter(Total.Italy > 99) %>%
+  mutate(zDay = seq(1:29))
+
+#create one dataframe with both Italy & US
+us_match_italy <- us_conf %>%
+  dplyr::filter(Date >= as.Date("2020-02-23"))
+
+us_match_italy$day_us <- 0
+us_match_italy$day_us[10:29] <- seq(1:20)
+
+us_it_conf100 <- left_join(it_conf100, us_match_italy)
+
+#Let's Plot Our Data Raw (without Population) - this mimmics a popular graph being circulated currently
+ggplot(us_it_conf100) + 
+  geom_col(aes(x = zDay, y=Total.Italy), fill = "darkorange") + 
+  geom_col(aes(x = day_us, y=Total.US), fill = "dodgerblue1") +
+  labs(x="Days Starting @ 100+ Cases", y = "Total COVID-19 Cases Confirmed",
+       title = "COVID-19 Confirmed in Italy Total & US by Day", subtitle = "Starting at 100 Reported Cases") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) +
+  geom_label(label="US Passes Italy on Day 18", x=18, y = 40000, label.size = .1, color = "black")
+```
+
+This is a popular graphic that is going around currently. At first glance, it shows that the US is outpacing Italy if you measure from the first day that each country reported at least 100 confirmed cases. However, we haven't taken population or population density into account yet.
+
+###US Compared to Italy as a Percentage of Population
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#create columns for US & Italy that show % of population cofirmed with the virus
+#latest population of both countries according to Google: Italy 61M & US 330M
+us_it_conf100 <- us_it_conf100 %>%
+  mutate(italy_rate = Total.Italy/61000000) %>%
+  mutate(us_rate = Total.US/330000000)
+
+#Now, let's plot again as a % of the population
+ggplot(us_it_conf100) + 
+  geom_col(aes(x = zDay, y=italy_rate), fill = "darkorange") + 
+  geom_col(aes(x = day_us, y=us_rate), fill = "dodgerblue1") +
+  labs(x="Days Starting @ 100+ Cases", y = "Total COVID-19 Cases Confirmed by % of Population",
+       title = "COVID-19 Confirmed in Italy Total & US by Day by % of Population", subtitle = "Starting at 100 Reported Cases") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+  geom_label(label="US Passes Italy on Day 18", x=18, y = 40000, label.size = .1, color = "black")
+
+```
+
+Now this is a little bit better of a picture of how the virus is spreading give the vast population difference. It is clear that there is still an increase in cases but again, we don't have a way to truly measure the spread unless we have a set sample group that is completely unbiased and tested frequently. 
+
+##What about Population Density Differences? 
+In the US, West Virginia was the last state to report a COVID case. That is partially because testing was delayed and also because there isn't a high population density. West Virginia has a total population of 1.8M. Let's contrast that to New York which seems to be really struggling with COVID. The entire state population of New York is 20M with New York City alone making up a staggering 18.8M of that number.
+
+###Let's Compare New York City to West Virginia
+Using the same data, let's see what the spread looks like for a densely populated area as opposed to a more rural area. 
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#create wv_conf
+wv_conf <- conf %>%
+  select(-c(Lat, Long)) %>%
+  filter(Country.Region == "US" & Province.State == "West Virginia")
+
+wv_dim <- dim(wv_conf)[2]
+
+names(wv_conf)[3:wv_dim] <- substring(names(wv_conf)[3:wv_dim], 2) #rename date columns
+
+wv_conf <- wv_conf %>%
+  summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of West Virginia
+  gather(Date, value = "Total.WV")
+
+wv_conf$Date <- gsub("\\.", "-", wv_conf$Date) #remove . and replace with -
+wv_conf$Date <- as.Date(wv_conf$Date, format = "%m-%d-%y") #format as date
+
+
+
+#create ny_conf
+ny_conf <- conf %>%
+  select(-c(Lat, Long)) %>%
+  filter(Country.Region == "US" & Province.State == "New York")
+
+ny_dim <- dim(ny_conf)[2]
+
+names(ny_conf)[3:ny_dim] <- substring(names(ny_conf)[3:ny_dim], 2) #rename date columns
+
+ny_conf <- ny_conf %>%
+  summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of West Virginia
+  gather(Date, value = "Total.NY")
+
+ny_conf$Date <- gsub("\\.", "-", ny_conf$Date) #remove . and replace with -
+ny_conf$Date <- as.Date(ny_conf$Date, format = "%m-%d-%y") #format as date
+
+#set same starting date for both states where they both start with 0 confirmed cases
+ny_conf <- ny_conf %>% filter(Date >= "2020-03-09")
+wv_conf <- wv_conf %>% filter(Date >= "2020-03-09")
+
+
+#create new dataframe of both wv & ny for plotting
+wv_ny_conf <- left_join(wv_conf, ny_conf)
+```
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#plot raw data without concern of population
+wv_ny_plot1 <- ggplot(wv_ny_conf, aes(x = Date)) + 
+  geom_col(aes(y=Total.NY), fill = "gold") + 
+  geom_col(aes(y=Total.WV), fill = "blue") +
+  labs(x="Days Starting From 03/09/20", y = "Total COVID-19 Cases Confirmed",
+       title = "COVID-19 Confirmed in WV & NY by Day", subtitle = "Starting 0 Reported Cases") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+wv_ny_plot1
+```
+
+It looks like the data from WV isn't showing up, but in reality, the data is present but there are so few cases in WV that we can't see it at the current scale that the NY data is show. Here I zoom in to a scale capped at just 500 cases so that the WV data actually shows up.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+wv_ny_plot2 <- ggplot(wv_ny_conf, aes(x = Date)) + 
+  geom_col(aes(y=Total.NY), fill = "gold") + 
+  geom_col(aes(y=Total.WV), fill = "blue") +
+  labs(x="Days Starting From 03/09/20", y = "Total COVID-19 Cases Confirmed",
+       title = "ZOOMED IN: COVID-19 Confirmed in WV & NY by Day", subtitle = "Starting 0 Reported Cases") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) + 
+  coord_cartesian(ylim=c(0,500))
+wv_ny_plot2
+```
+
+Now, let's take a look again this time considering the % of population which is more relevant in terms of determining if population density has any correlation to the spread of COVID.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+#plot with data by population
+#create columns for WV & NY that show % of population cofirmed with the virus
+#latest population of both states according to Google: WV 1.8M & NY 20M
+wv_ny_conf <- wv_ny_conf %>%
+  mutate(wv_rate = Total.WV/1800000) %>%
+  mutate(ny_rate = Total.NY/22000000)
+
+#Now, let's plot again as a % of the population
+wv_ny_perc <- ggplot(wv_ny_conf) + 
+  geom_col(aes(x = Date, y=ny_rate), fill = "gold") + 
+  geom_col(aes(x = Date, y=wv_rate), fill = "blue") +
+  labs(x="Days Starting @ 0 Cases", y = "Total COVID-19 Cases Confirmed by % of Population",
+       title = "COVID-19 Confirmed Total in WV & NY by Day", subtitle = "By % of Population") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+wv_ny_perc
+
+```
+
+I can see the WV data showing up but again it is so few cases that I need to zoom in. I'll cap the percentage to .0004% so we can get a better picture. But notice what I said...I'll cap the percentage to .00005% of the population. Even in NY, we are at a very small percentage of the population at this point.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#Now, let's plot again as a % of the population zoomed in
+wv_ny_perc2 <- ggplot(wv_ny_conf) + 
+  geom_col(aes(x = Date, y=ny_rate), fill = "gold") + 
+  geom_col(aes(x = Date, y=wv_rate), fill = "blue") +
+  labs(x="Days Starting @ 0 Cases", y = "Total COVID-19 Cases Confirmed by % of Population",
+       title = "ZOOMED IN: COVID-19 Confirmed Total in WV & NY by Day", subtitle = "By % of Population") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) +
+  coord_cartesian(ylim=c(0, .00005))
+wv_ny_perc2
+
+```
+
+I think we can at least see that population density might have something to do with the spread of this virus which makes obvious sense. With more people packed in a smaller space we would expect a higher transmission of a highly contagious virus. 
+
+###What About Confirmed Cases By Day by Square Mile
+Now this should be even more telling. Let's compare the WV data to the NY data and instead of dividing the confirmed cases by the population, let's divide the cases by the area of the state in square miles. Area of WV is: 24,000 and the area of NY is: 302 and the area of Italy is 116,000 per Google.
+
+To do this, I will create a small dataset that contains each location's area, population & confirmed cases. The confirmed cases will be the first 10 days of the virus being reported in each location. From there, I'll calculate the confirmed infection per population % and per square mile. 
+
+```{r}
+#build a dataframe of Wv, NY & Italy showing area, population & confirmed cases starting at 
+
+```
