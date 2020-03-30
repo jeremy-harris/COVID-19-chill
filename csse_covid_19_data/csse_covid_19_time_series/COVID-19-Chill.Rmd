@@ -20,7 +20,7 @@ I'll be pulling the data from the Johns Hopkins' time series reports. The report
 ##Confirmed Cases Analysis
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 #Read in the three time series csv files from Johns Hopkins
-conf <- read.csv("time_series_19-covid-Confirmed.csv")
+conf <- read.csv("time_series_covid19_confirmed_global.csv")
 # reco <- read.csv("time_series_19-covid-Recovered.csv")
 # dead <- read.csv("time_series_19-covid-Deaths.csv")
 
@@ -35,7 +35,9 @@ us_conf <- conf %>%
   select(-c(Province.State, Lat, Long)) %>%
   filter(Country.Region == "US")
 
-names(us_conf)[2:62] <- substring(names(us_conf)[2:62], 2) #rename date columns
+dim_us <- dim(us_conf)[2]
+
+names(us_conf)[2:dim_us] <- substring(names(us_conf)[2:dim_us], 2) #rename date columns
 
 us_conf <- us_conf %>%
   summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of the US
@@ -49,7 +51,7 @@ us_conf$Date <- as.Date(us_conf$Date, format = "%m-%d-%y") #format as date
 #create data with a start point of 100 cases and show as "Day 1" instead of actual date
 us_conf100 <- us_conf %>%
   filter(Total.US > 99) %>%
-  mutate(zDay = seq(1:20))
+  mutate(zDay = seq(1:dim(us_conf %>% filter(Total.US > 99))[1]))
 
 #plot the us data
 ggplot(us_conf100, aes(zDay, Total.US)) + 
@@ -76,7 +78,9 @@ it_conf <- conf %>%
   select(-c(Province.State, Lat, Long)) %>%
   filter(Country.Region == "Italy")
 
-names(it_conf)[2:62] <- substring(names(it_conf)[2:62], 2) #rename date columns
+it_dim <- dim(it_conf)[2]
+
+names(it_conf)[2:it_dim] <- substring(names(it_conf)[2:it_dim], 2) #rename date columns
 
 it_conf <- it_conf %>%
   summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of the US
@@ -88,14 +92,15 @@ it_conf$Date <- as.Date(it_conf$Date, format = "%m-%d-%y") #format as date
 #create data with a start point of 100 cases and show as "Day 1" instead of actual date
 it_conf100 <- it_conf %>%
   filter(Total.Italy > 99) %>%
-  mutate(zDay = seq(1:29))
+  mutate(zDay = seq(1:dim(it_conf %>% filter(Total.Italy > 99))[1]))
 
 #create one dataframe with both Italy & US
 us_match_italy <- us_conf %>%
-  dplyr::filter(Date >= as.Date("2020-02-23"))
+  filter(Date >= as.Date("2020-02-23"))
 
 us_match_italy$day_us <- 0
-us_match_italy$day_us[10:29] <- seq(1:20)
+dim_match <- dim(us_match_italy)[1]
+us_match_italy$day_us[10:dim_match] <- seq(1:dim_match)
 
 us_it_conf100 <- left_join(it_conf100, us_match_italy)
 
@@ -106,7 +111,7 @@ ggplot(us_it_conf100) +
   labs(x="Days Starting @ 100+ Cases", y = "Total COVID-19 Cases Confirmed",
        title = "COVID-19 Confirmed in Italy Total & US by Day", subtitle = "Starting at 100 Reported Cases") + 
   theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) +
-  geom_label(label="US Passes Italy on Day 18", x=18, y = 40000, label.size = .1, color = "black")
+  geom_label(label="US Passes Italy on Day 18", x=14, y = 40000, label.size = .1, color = "black")
 ```
 
 This is a popular graphic that is going around currently. At first glance, it shows that the US is outpacing Italy if you measure from the first day that each country reported at least 100 confirmed cases. However, we haven't taken population or population density into account yet.
@@ -136,55 +141,106 @@ Now this is a little bit better of a picture of how the virus is spreading give 
 In the US, West Virginia was the last state to report a COVID case. That is partially because testing was delayed and also because there isn't a high population density. West Virginia has a total population of 1.8M. Let's contrast that to New York which seems to be really struggling with COVID. The entire state population of New York is 20M with New York City alone making up a staggering 18.8M of that number.
 
 ###Let's Compare New York City to West Virginia
-Using the same data, let's see what the spread looks like for a densely populated area as opposed to a more rural area. 
+Johns Hopkins stopped updating their data with state level numbers on 03/23. I start using covidtracking.com data from this point forward which as state level data. 
+
+Let's look at population density data and compare WV to NY.
+
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
-#create wv_conf
-wv_conf <- conf %>%
-  select(-c(Lat, Long)) %>%
-  filter(Country.Region == "US" & Province.State == "West Virginia")
+library(jsonlite)
 
-wv_dim <- dim(wv_conf)[2]
+#load JSON data for state level information from covidtracking.com & clean up a bit
+states_daily <- fromJSON("https://covidtracking.com/api/states/daily")
+states <- states_daily %>%
+  select(state, positive, death, total, date)
 
-names(wv_conf)[3:wv_dim] <- substring(names(wv_conf)[3:wv_dim], 2) #rename date columns
+#create wv dataframe, change date format, set as date, set NA = 0
+wv_daily <- states %>%
+  filter(state == "WV") %>%
+  rename(Date = date) %>%
+  arrange(desc(-Date))
+wv_daily$Date <- gsub('^([0-9]{6})', '\\1-', wv_daily$Date)
+wv_daily$Date <- gsub('^([0-9]{4})', '\\1-', wv_daily$Date)
+wv_daily$Date <- as.Date(wv_daily$Date)
+wv_daily[is.na(wv_daily)] <- 0
 
-wv_conf <- wv_conf %>%
-  summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of West Virginia
-  gather(Date, value = "Total.WV")
+#create positive testing rate (#positive / #tested) & death rate (#death / #positive)
+wv_daily <- wv_daily %>%
+  mutate(test_pos_rate = positive/total) %>%
+  mutate(death_rate = death/total)
 
-wv_conf$Date <- gsub("\\.", "-", wv_conf$Date) #remove . and replace with -
-wv_conf$Date <- as.Date(wv_conf$Date, format = "%m-%d-%y") #format as date
+#re-order & set all names to start with wv except for date
+wv_daily <- wv_daily %>% select(5, 1:4, 6:7)
+colnames(wv_daily)[2:dim(wv_daily)[2]] <- str_c("wv", colnames(wv_daily)[2:dim(wv_daily)[2]])
 
 
+#create ny dataframe, change date format, set as date, set NA = 0 and set all names to start with ny
+ny_daily <- states %>%
+  filter(state == "NY") %>%
+  rename(Date = date) %>%
+  arrange(desc(-Date))
+ny_daily$Date <- gsub('^([0-9]{6})', '\\1-', ny_daily$Date)
+ny_daily$Date <- gsub('^([0-9]{4})', '\\1-', ny_daily$Date)
+ny_daily$Date <- as.Date(ny_daily$Date)
+ny_daily[is.na(ny_daily)] <- 0
 
-#create ny_conf
-ny_conf <- conf %>%
-  select(-c(Lat, Long)) %>%
-  filter(Country.Region == "US" & Province.State == "New York")
+#create positive testing rate (#positive / #tested) & death rate (#death / #positive)
+ny_daily <- ny_daily %>%
+  mutate(test_pos_rate = positive/total) %>%
+  mutate(death_rate = death/total)
 
-ny_dim <- dim(ny_conf)[2]
+#re-order & set all names to start with wv except for date
+ny_daily <- ny_daily %>% select(5, 1:4, 6:7)
+colnames(ny_daily)[2:dim(ny_daily)[2]] <- str_c("ny", colnames(ny_daily)[2:dim(ny_daily)[2]])
 
-names(ny_conf)[3:ny_dim] <- substring(names(ny_conf)[3:ny_dim], 2) #rename date columns
-
-ny_conf <- ny_conf %>%
-  summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of West Virginia
-  gather(Date, value = "Total.NY")
-
-ny_conf$Date <- gsub("\\.", "-", ny_conf$Date) #remove . and replace with -
-ny_conf$Date <- as.Date(ny_conf$Date, format = "%m-%d-%y") #format as date
+######################################################
+### This was my code for the Johns Hopkins data ######
+######################################################
+# #create wv_conf
+# wv_conf <- conf %>%
+#   select(-c(Lat, Long)) %>%
+#   filter(Country.Region == "US" & Province.State == "West Virginia")
+# 
+# wv_dim <- dim(wv_conf)[2]
+# 
+# names(wv_conf)[3:wv_dim] <- substring(names(wv_conf)[3:wv_dim], 2) #rename date columns
+# 
+# wv_conf <- wv_conf %>%
+#   summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of West Virginia
+#   gather(Date, value = "Total.WV")
+# 
+# wv_conf$Date <- gsub("\\.", "-", wv_conf$Date) #remove . and replace with -
+# wv_conf$Date <- as.Date(wv_conf$Date, format = "%m-%d-%y") #format as date
+# 
+# #create ny_conf
+# ny_conf <- conf %>%
+#   select(-c(Lat, Long)) %>%
+#   filter(Country.Region == "US" & Province.State == "New York")
+# 
+# ny_dim <- dim(ny_conf)[2]
+# 
+# names(ny_conf)[3:ny_dim] <- substring(names(ny_conf)[3:ny_dim], 2) #rename date columns
+# 
+# ny_conf <- ny_conf %>%
+#   summarise_if(is.integer, function(x) sum(x)) %>%#summarise by day for all of West Virginia
+#   gather(Date, value = "Total.NY")
+# 
+# ny_conf$Date <- gsub("\\.", "-", ny_conf$Date) #remove . and replace with -
+# ny_conf$Date <- as.Date(ny_conf$Date, format = "%m-%d-%y") #format as date
+########################################################
 
 #set same starting date for both states where they both start with 0 confirmed cases
-ny_conf <- ny_conf %>% filter(Date >= "2020-03-09")
-wv_conf <- wv_conf %>% filter(Date >= "2020-03-09")
+ny_daily <- ny_daily %>% filter(Date >= "2020-03-09")
+wv_daily <- wv_daily %>% filter(Date >= "2020-03-09")
 
 
 #create new dataframe of both wv & ny for plotting
-wv_ny_conf <- left_join(wv_conf, ny_conf)
+wv_ny_daily <- left_join(wv_daily, ny_daily)
 ```
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 #plot raw data without concern of population
-wv_ny_plot1 <- ggplot(wv_ny_conf, aes(x = Date)) + 
-  geom_col(aes(y=Total.NY), fill = "gold") + 
-  geom_col(aes(y=Total.WV), fill = "blue") +
+wv_ny_plot1 <- ggplot(wv_ny_daily, aes(x = Date)) + 
+  geom_col(aes(y=nypositive), fill = "gold") + 
+  geom_col(aes(y=wvpositive), fill = "blue") +
   labs(x="Days Starting From 03/09/20", y = "Total COVID-19 Cases Confirmed",
        title = "COVID-19 Confirmed in WV & NY by Day", subtitle = "Starting 0 Reported Cases") + 
   theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
@@ -194,14 +250,140 @@ wv_ny_plot1
 It looks like the data from WV isn't showing up, but in reality, the data is present but there are so few cases in WV that we can't see it at the current scale that the NY data is show. Here I zoom in to a scale capped at just 500 cases so that the WV data actually shows up.
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
-wv_ny_plot2 <- ggplot(wv_ny_conf, aes(x = Date)) + 
-  geom_col(aes(y=Total.NY), fill = "gold") + 
-  geom_col(aes(y=Total.WV), fill = "blue") +
-  labs(x="Days Starting From 03/09/20", y = "Total COVID-19 Cases Confirmed",
-       title = "ZOOMED IN: COVID-19 Confirmed in WV & NY by Day", subtitle = "Starting 0 Reported Cases") + 
-  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) + 
-  coord_cartesian(ylim=c(0,500))
+wv_ny_plot2 <- wv_ny_plot1 + coord_cartesian(ylim=c(0,500))
 wv_ny_plot2
+```
+
+#Let's Look at US Numbers Without NY Included
+I think that large cities with a high population density are really skewing the numbers. I want to remove NY and take a look at the data.
+
+```{r}
+#create ny dataframe, change date format, set as date, set NA = 0 and set all names to start with ny
+no_ny <- states %>%
+  filter(state != "NY") %>%
+  rename(Date = date) %>%
+  arrange(desc(-Date))
+no_ny$Date <- gsub('^([0-9]{6})', '\\1-', no_ny$Date)
+no_ny$Date <- gsub('^([0-9]{4})', '\\1-', no_ny$Date)
+no_ny$Date <- as.Date(no_ny$Date)
+no_ny[is.na(no_ny)] <- 0
+
+# #create positive testing rate (#positive / #tested) & death rate (#death / #positive)
+# no_ny <- no_ny %>%
+#   mutate(test_pos_rate = positive/total) %>%
+#   mutate(death_rate = death/total)
+# no_ny[is.na(no_ny)] <- 0
+
+#re-order & set all names to start with wv except for date
+no_ny <- no_ny %>% select(5, 2) #drop state
+#colnames(no_ny)[2:dim(no_ny)[2]] <- str_c("ny", colnames(no_ny)[2:dim(no_ny)[2]])
+
+#group by day
+no_ny_sum <- no_ny %>% group_by(Date) %>%
+  tally(positive)
+
+
+### All states
+all_us <- states %>%
+  rename(Date = date) %>%
+  arrange(desc(-Date))
+all_us$Date <- gsub('^([0-9]{6})', '\\1-', all_us$Date)
+all_us$Date <- gsub('^([0-9]{4})', '\\1-', all_us$Date)
+all_us$Date <- as.Date(all_us$Date)
+all_us[is.na(all_us)] <- 0
+
+all_us <- all_us %>% select(5, 2) #drop state
+all_us_sum <- all_us %>% group_by(Date) %>%
+  tally(positive)
+
+
+```
+```{r}
+#plot the no_ny data
+ggplot(no_ny_sum) + 
+  geom_col(aes(x = Date, y=n/1000), fill = "darkorange") + 
+  labs(x="Date", y = "Accumulative Cases",
+       title = "Accumulative Cases by Day in US (Without NY) - 1000's") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+
+#plot all us data
+ggplot(all_us_sum) + 
+  geom_col(aes(x = Date, y=n/1000), fill = "dodgerblue1") + 
+  labs(x="Date", y = "Accumulative Cases",
+       title = "Accumulative Cases by Day in US - 1000's") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+```
+
+###Let's Look at NY & US Numbers of Death & Recoveries
+I think that large cities with a high population density are really skewing the numbers. I want to remove NY and take a look at the data.
+
+```{r}
+#create ny dataframe, change date format, set as date, set NA = 0 and set all names to start with ny
+ny_death <- states %>%
+  filter(state == "NY") %>%
+  rename(Date = date) %>%
+  arrange(desc(-Date))
+ny_death$Date <- gsub('^([0-9]{6})', '\\1-', ny_death$Date)
+ny_death$Date <- gsub('^([0-9]{4})', '\\1-', ny_death$Date)
+ny_death$Date <- as.Date(ny_death$Date)
+ny_death[is.na(ny_death)] <- 0
+ny_death <- ny_death %>% select(5, 3) #drop state
+
+ny_death_sum <- ny_death %>% group_by(Date) %>%
+  tally(death)
+
+
+###CA death info
+ca_death <- states %>%
+  filter(state == "CA") %>%
+  rename(Date = date) %>%
+  arrange(desc(-Date))
+ca_death$Date <- gsub('^([0-9]{6})', '\\1-', ca_death$Date)
+ca_death$Date <- gsub('^([0-9]{4})', '\\1-', ca_death$Date)
+ca_death$Date <- as.Date(ca_death$Date)
+ca_death[is.na(ca_death)] <- 0
+
+ca_death <- ca_death %>% select(5, 3) #drop state
+ca_death_sum <- ca_death %>% group_by(Date) %>%
+  tally(death)
+
+
+### All states
+all_us_death <- states %>%
+  rename(Date = date) %>%
+  arrange(desc(-Date))
+all_us_death$Date <- gsub('^([0-9]{6})', '\\1-', all_us_death$Date)
+all_us_death$Date <- gsub('^([0-9]{4})', '\\1-', all_us_death$Date)
+all_us_death$Date <- as.Date(all_us_death$Date)
+all_us_death[is.na(all_us_death)] <- 0
+
+all_us_death <- all_us_death %>% select(5, 3) #drop state
+all_us_death_sum <- all_us_death %>% group_by(Date) %>%
+  tally(death)
+
+
+```
+```{r}
+#plot the ny_death data
+ggplot(ny_death_sum) + 
+  geom_col(aes(x = Date, y=n), fill = "darkorange") + 
+  labs(x="Date", y = "Accumulative Deaths",
+       title = "Accumulative Deaths in NY") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+
+#plot the ca_death data
+ggplot(ca_death_sum) + 
+  geom_col(aes(x = Date, y=n), fill = "orchid") + 
+  labs(x="Date", y = "Accumulative Deaths",
+       title = "Accumulative Deaths in CA") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+
+#plot all us data
+ggplot(all_us_death_sum) + 
+  geom_col(aes(x = Date, y=n), fill = "dodgerblue1") + 
+  labs(x="Date", y = "Accumulative Deaths",
+       title = "Accumulative Deaths in US") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
 ```
 
 Now, let's take a look again this time considering the % of population which is more relevant in terms of determining if population density has any correlation to the spread of COVID.
@@ -211,14 +393,16 @@ Now, let's take a look again this time considering the % of population which is 
 #plot with data by population
 #create columns for WV & NY that show % of population cofirmed with the virus
 #latest population of both states according to Google: WV 1.8M & NY 20M
-wv_ny_conf <- wv_ny_conf %>%
-  mutate(wv_rate = Total.WV/1800000) %>%
-  mutate(ny_rate = Total.NY/22000000)
+wv_ny_daily <- wv_ny_daily %>%
+  mutate(wv_pos_pop_rate = wvpositive/1800000) %>%
+  mutate(ny_pos_pop_rate = nypositive/22000000)
+wv_ny_daily <- wv_ny_daily %>% select(1:7,14, 8:13, 15)
+
 
 #Now, let's plot again as a % of the population
-wv_ny_perc <- ggplot(wv_ny_conf) + 
-  geom_col(aes(x = Date, y=ny_rate), fill = "gold") + 
-  geom_col(aes(x = Date, y=wv_rate), fill = "blue") +
+wv_ny_perc <- ggplot(wv_ny_daily) + 
+  geom_col(aes(x = Date, y=ny_pos_rate), fill = "gold") + 
+  geom_col(aes(x = Date, y=wv_pos_rate), fill = "blue") +
   labs(x="Days Starting @ 0 Cases", y = "Total COVID-19 Cases Confirmed by % of Population",
        title = "COVID-19 Confirmed Total in WV & NY by Day", subtitle = "By % of Population") + 
   theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
@@ -226,17 +410,17 @@ wv_ny_perc
 
 ```
 
-I can see the WV data showing up but again it is so few cases that I need to zoom in. I'll cap the percentage to .0004% so we can get a better picture. But notice what I said...I'll cap the percentage to .00005% of the population. Even in NY, we are at a very small percentage of the population at this point.
+I can see the WV data showing up but again it is so few cases that I need to zoom in. I'll cap the percentage to .0005% so we can get a better picture. But notice what I said...I'll cap the percentage to .0005% of the population. Even in NY, we are at a very small percentage of the population at this point.
 
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 #Now, let's plot again as a % of the population zoomed in
-wv_ny_perc2 <- ggplot(wv_ny_conf) + 
-  geom_col(aes(x = Date, y=ny_rate), fill = "gold") + 
-  geom_col(aes(x = Date, y=wv_rate), fill = "blue") +
+wv_ny_perc2 <- ggplot(wv_ny_daily) + 
+  geom_col(aes(x = Date, y=ny_pos_rate), fill = "gold") + 
+  geom_col(aes(x = Date, y=wv_pos_rate), fill = "blue") +
   labs(x="Days Starting @ 0 Cases", y = "Total COVID-19 Cases Confirmed by % of Population",
        title = "ZOOMED IN: COVID-19 Confirmed Total in WV & NY by Day", subtitle = "By % of Population") + 
   theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5)) +
-  coord_cartesian(ylim=c(0, .00005))
+  coord_cartesian(ylim=c(0, .0005))
 wv_ny_perc2
 
 ```
@@ -249,6 +433,48 @@ Now this should be even more telling. Let's compare the WV data to the NY data a
 To do this, I will create a small dataset that contains each location's area, population & confirmed cases. The confirmed cases will be the first 10 days of the virus being reported in each location. From there, I'll calculate the confirmed infection per population % and per square mile. 
 
 ```{r}
-#build a dataframe of Wv, NY & Italy showing area, population & confirmed cases starting at 
+#data given square miles of area
+ny_area <- 54556
+wv_area <- 24038
 
+wv_ny_daily <- wv_ny_daily %>%
+  mutate(ny_pos_sqmi = nypositive/ny_area) %>%
+  mutate(wv_pos_sqmi = wvpositive/wv_area)
+
+#subset data to show a bar chart of key statistics between NY & WV
+wv_ny_compare <- wv_ny_daily[dim(wv_ny_daily)[1],]
+wv_ny_compare$Date <- NULL
+wv_ny_names <- c("state", "positive", "death", "tests", "test_pos_rate", "death_rate", "pos_pop_rate",
+                 "state", "positive", "death", "tests", "test_pos_rate", "death_rate", "pos_pop_rate",
+                 "pos_sqmi", "pos_sqmi")
+names(wv_ny_compare) <- wv_ny_names
+plot_split <- wv_ny_compare[,8:15]
+plot_split <- rbind(plot_split, wv_ny_compare[, c(1:7,16)])
 ```
+```{r}
+library(gridExtra)
+#plot various aspects of the comparison data
+pos_plot <- ggplot(plot_split, aes(state, pos_pop_rate, fill=state)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x="States", y = "Percent of Popuation Confirmed with COVID",
+       title = "Positive/Population") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+
+pos_pop_plot <- ggplot(plot_split, aes(state, test_pos_rate, fill=state)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x="States", y = "% of Tests That Were Confirmed POSITIVE w/ COVID",
+       title = "Positive/Total Tests") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+
+pos_sqmi_plot <- ggplot(plot_split, aes(state, pos_sqmi, fill=state)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x="States", y = "% of Postive COVID per Square Mile",
+       title = "Positive/Square Mile") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))
+
+grid.arrange(pos_plot, pos_pop_plot, pos_sqmi_plot, ncol=3)
+```
+
+
+
+
